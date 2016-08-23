@@ -2,3 +2,5 @@
 
 .idea
 *.xcodeproj
+
+*.log

@@ -22,13 +22,13 @@ static void print_time(const char* msg);
 static int print_buff(const char* buf);
 
 static inline int event_wait(int kq, struct kevent events[],
-                      int nevents_max, struct timespec* ts);
+                             int nevents_max, struct timespec* ts);
 static inline int event_ctrl(int kq,
                              int ident, int16_t filter,
                              uint16_t flags, uint32_t fflags,
                              intptr_t data, void* udata);
 
-int event_loop(int sockfd, int backlog)
+int event_loop(int sockfd, int backlog, int id)
 {
     const int MAX_EVENTS = 1024;
 
@@ -45,10 +45,10 @@ int event_loop(int sockfd, int backlog)
     char buf[1024];
     ssize_t nrecv;
 
-    int cnt = 0;
+    int num_alive = 0;
 
     assert(sockfd > 0);
-    printf("Sockfd = %d\n", sockfd);
+    printf("Sockfd=%d, id=%d\n", sockfd, id);
 
     if ((kq = kqueue()) == -1) {
         error_die("kqueue");
@@ -62,12 +62,10 @@ int event_loop(int sockfd, int backlog)
     ts.tv_sec = 0;
     ts.tv_nsec = 100000;
     while (loop_flag) {
-        ++cnt;
-
         nevents = event_wait(kq, events, MAX_EVENTS, &ts);
 
         for (int i = 0; i < nevents; ++i) {
-            printf("(%d/%d@%d) \n", i + 1, nevents, cnt);
+            printf("(%d/%d #%d) \n", i + 1, nevents, id);
 
             ident = (int)events[i].ident;
             flags = events[i].flags;
@@ -80,12 +78,18 @@ int event_loop(int sockfd, int backlog)
             else if (flags & EV_EOF) {
                 printf("Client %du closed\n", ident);
                 close(ident);
+
+                --num_alive;
+                if (num_alive <= 0) {
+                    goto end_while;
+                }
             }
             else if (ident == sockfd) {
                 if ((clientfd = accept(sockfd, NULL, NULL)) < 0) {
                     error_die("accept");
                 };
 
+                ++num_alive;
                 printf("New client connected:%du\n", clientfd);
                 if (event_ctrl(kq, clientfd, EVFILT_READ,
                         EV_ADD | EV_ENABLE, 0, 0, 0) < 0) {
@@ -104,14 +108,22 @@ int event_loop(int sockfd, int backlog)
                 printf("Received %3ld chars from client %du:\n", nrecv, ident);
 
                 if (print_buff(buf)) {
-                    if (send(ident, "HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n<h1>Hello, Chrome</h1>\r\n",
-                            sizeof("HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n<h1>Hello, Chrome</h1>\r\n"), 0) < 0) {
+                    printf("EOF\n");
+                    sprintf(buf, "HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n<h1>Hello, Chrome</h1>\r\n");
+                    if (send(ident, buf, strlen(buf), 0) < 0) {
                         error_die("send");
                     };
+                    close(ident);
                 }
             }
         }
     }
+
+    end_while:
+
+    printf("Loop exited #%d\n", id);
+    // TODO:??
+//        close(kq);
 
     return 0;
 }
@@ -164,7 +176,7 @@ int print_buff(const char* buf)
     int i = 0;
     char c;
 
-    int state = 0;
+    static int state = 0;
 
     assert(NULL != buf);
 
@@ -175,7 +187,6 @@ int print_buff(const char* buf)
                     ++state;
                 }
 
-//                fputs("\\r", stdout);
                 break;
             case '\n':
                 if (state == 1 || state == 3) {

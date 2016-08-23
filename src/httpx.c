@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <memory.h>
 
+#include <unistd.h>
 
 const int BACKLOG = 5;
 
@@ -23,7 +24,7 @@ int sock_listen(uint16_t* port)
     int sockfd = 0;
     struct sockaddr_in name;
 
-    int optval;
+    int optval = 1;
 
     /* socket */
     if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
@@ -35,12 +36,10 @@ int sock_listen(uint16_t* port)
         error_die("setsockopt(SO_REUSEADDR)");
     };
 
-#ifdef SO_REUSEPORT
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT,
             &optval, sizeof(optval)) == -1) {
         error_die("setsockopt(SO_REUSEPORT)");
     };
-#endif
 
     memset(&name, 0, sizeof(name));
     name.sin_family = AF_INET;
@@ -76,13 +75,37 @@ int main(int argc, char* argv[])
     int sockfd;
     int kq;
 
+    int i;
+    int* pids;
+
     uint16_t port = 4444;
+    int num_workers = 1;
+
+    pids = (int*)malloc(num_workers * sizeof(int));
 
     // TODO: get 'port' from options
 
-    sockfd = sock_listen(&port);
-    event_loop(sockfd, BACKLOG);
+    for (i = 0; i < num_workers; ++i) {
+        pids[i] = fork();
+        if (pids[i] == 0) {
+            sockfd = sock_listen(&port);
+            event_loop(sockfd, BACKLOG, i + 1);
 
-    printf("Hello, world!");
+            close(sockfd);
+            printf("#%d exited\n", i + 1);
+            exit(0);
+        }
+        else if (pids[i] == -1) {
+            error_die("fork");
+        }
+    }
+
+    for (i = 0; i < num_workers; ++i) {
+        waitpid(pids[i], NULL, 0);
+    }
+
+    free(pids);
+
+    printf("\nHello, world!\n");
     return 0;
 }
