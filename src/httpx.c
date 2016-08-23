@@ -14,8 +14,8 @@
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <memory.h>
-
 #include <unistd.h>
+#include <sys/wait.h>
 
 const int BACKLOG = 5;
 
