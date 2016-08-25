@@ -5,6 +5,8 @@
 #ifndef HTTPX_KQUEUE_H
 #define HTTPX_KQUEUE_H
 
+typedef struct event_s event_t;
+
 int event_loop(int sockfd, int backlog, int id);
 
 #endif //HTTPX_KQUEUE_H

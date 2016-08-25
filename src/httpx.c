@@ -6,7 +6,7 @@
 //  Copyright © 2016年 xsfour. All rights reserved.
 //
 
-#include "kqueue.h"
+#include "events/kqueue.h"
 #include "utils.h"
 
 #include <stdint.h>
@@ -15,29 +15,75 @@
 #include <netinet/in.h>
 #include <memory.h>
 #include <unistd.h>
-#include <sys/wait.h>
+#include <assert.h>
+#include <signal.h>
+
 
 const int BACKLOG = 5;
+int NWORKERS = 4;
+
+int* pids = NULL;
+
+int sock_listen(uint16_t* port);
+void terminate(int sig);
+
+int main(int argc, char* argv[])
+{
+    int sockfd;
+    int kq;
+
+    int i;
+
+    uint16_t port = 4444;
+
+    pids = (int*)malloc(NWORKERS * sizeof(int));
+
+    // TODO: get 'port' from options
+
+    for (i = 0; i < NWORKERS; ++i) {
+        pids[i] = fork();
+        if (pids[i] == 0) {
+            sockfd = sock_listen(&port);
+            event_loop(sockfd, BACKLOG, i + 1);
+
+            close(sockfd);
+            printf("#%d exited\n", i + 1);
+            exit(0);
+        }
+        else if (pids[i] == -1) {
+            error_die("fork");
+        }
+    }
+
+    signal(0, terminate);
+
+    for (i = 0; i < NWORKERS; ++i) {
+        waitpid(pids[i], NULL, 0);
+    }
+
+    free(pids);
+
+    printf("\nHello, world!\n");
+    return 0;
+}
 
 int sock_listen(uint16_t* port)
 {
     int sockfd = 0;
     struct sockaddr_in name;
 
-    int optval = 1;
+    const int optval = 1;
 
     /* socket */
     if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
         error_die("socket");
     }
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
-            &optval, sizeof(optval)) == -1) {
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) == -1) {
         error_die("setsockopt(SO_REUSEADDR)");
     };
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT,
-            &optval, sizeof(optval)) == -1) {
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval)) == -1) {
         error_die("setsockopt(SO_REUSEPORT)");
     };
 
@@ -65,47 +111,18 @@ int sock_listen(uint16_t* port)
         error_die("listen");
     }
 
-    fprintf(stdout, "Server listening to 0.0.0.0:%d...\n", *port);
+    fprintf(stdout, "Listening to 0.0.0.0:%d ...\n", *port);
 
     return sockfd;
 }
 
-int main(int argc, char* argv[])
+void terminate(int sig)
 {
-    int sockfd;
-    int kq;
-
     int i;
-    int* pids;
 
-    uint16_t port = 4444;
-    int num_workers = 1;
-
-    pids = (int*)malloc(num_workers * sizeof(int));
-
-    // TODO: get 'port' from options
-
-    for (i = 0; i < num_workers; ++i) {
-        pids[i] = fork();
-        if (pids[i] == 0) {
-            sockfd = sock_listen(&port);
-            event_loop(sockfd, BACKLOG, i + 1);
-
-            close(sockfd);
-            printf("#%d exited\n", i + 1);
-            exit(0);
-        }
-        else if (pids[i] == -1) {
-            error_die("fork");
-        }
+    assert(pids != NULL);
+    
+    for (i = 0; i < NWORKERS; ++i) {
+        kill(pids[i], sig);
     }
-
-    for (i = 0; i < num_workers; ++i) {
-        waitpid(pids[i], NULL, 0);
-    }
-
-    free(pids);
-
-    printf("\nHello, world!\n");
-    return 0;
 }

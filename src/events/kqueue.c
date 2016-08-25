@@ -3,18 +3,17 @@
 //
 
 #include "kqueue.h"
-#include "utils.h"
+#include "../utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <stddef.h>
 #include <unistd.h>
 #include <sys/event.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <memory.h>
-#include <errno.h>
+#include <signal.h>
 
 static int loop_flag = 1;
 
@@ -27,6 +26,8 @@ static inline int event_ctrl(int kq,
                              int ident, int16_t filter,
                              uint16_t flags, uint32_t fflags,
                              intptr_t data, void* udata);
+
+static void event_stop(int sig);
 
 int event_loop(int sockfd, int backlog, int id)
 {
@@ -45,8 +46,6 @@ int event_loop(int sockfd, int backlog, int id)
     char buf[1024];
     ssize_t nrecv;
 
-    int num_alive = 0;
-
     assert(sockfd > 0);
     printf("Sockfd=%d, id=%d\n", sockfd, id);
 
@@ -54,13 +53,18 @@ int event_loop(int sockfd, int backlog, int id)
         error_die("kqueue");
     };
 
-    if (event_ctrl(kq, sockfd, EVFILT_READ,
-            EV_ADD | EV_ENABLE, 0, backlog, 0) < 0) {
+    /* 将监听的连接添加到事件队列 */
+    if (event_ctrl(kq, sockfd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, backlog, 0) < 0) {
         error_die("kevent(delete)");
     };
 
     ts.tv_sec = 0;
     ts.tv_nsec = 100000;
+
+    /* 设置信号处理函数 */
+    signal(SIGINT, event_stop);
+
+    loop_flag = 1;
     while (loop_flag) {
         nevents = event_wait(kq, events, MAX_EVENTS, &ts);
 
@@ -70,33 +74,26 @@ int event_loop(int sockfd, int backlog, int id)
             ident = (int)events[i].ident;
             flags = events[i].flags;
 
-            if (flags & EV_ERROR) {
+            if (flags & EV_ERROR) {         /* 发生错误 */
                 fprintf(stderr, "Error occurred(ident=%du, f=%x): %s\n",
                         ident, flags, strerror((int)events[i].data));
                 exit(1);
             }
-            else if (flags & EV_EOF) {
+            else if (flags & EV_EOF) {      /* 客户端关闭 */
                 printf("Client %du closed\n", ident);
                 close(ident);
-
-                --num_alive;
-                if (num_alive <= 0) {
-                    goto end_while;
-                }
             }
-            else if (ident == sockfd) {
+            else if (ident == sockfd) {     /* 新连接 */
                 if ((clientfd = accept(sockfd, NULL, NULL)) < 0) {
                     error_die("accept");
                 };
 
-                ++num_alive;
                 printf("New client connected:%du\n", clientfd);
-                if (event_ctrl(kq, clientfd, EVFILT_READ,
-                        EV_ADD | EV_ENABLE, 0, 0, 0) < 0) {
+                if (event_ctrl(kq, clientfd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0) < 0) {
                     error_die("kevent(add)");
                 };
             }
-            else if (events[i].filter & EVFILT_READ) {
+            else if (events[i].filter & EVFILT_READ) {  /* 新请求 */
                 // TODO: 调用 HTTP 模块处理
 
                 memset(buf, 0, sizeof(buf));
@@ -119,11 +116,8 @@ int event_loop(int sockfd, int backlog, int id)
         }
     }
 
-    end_while:
-
     printf("Loop exited #%d\n", id);
-    // TODO:??
-//        close(kq);
+    close(kq);
 
     return 0;
 }
@@ -182,26 +176,30 @@ int print_buff(const char* buf)
 
     while ((c = buf[i++])) {
         switch (c) {
-            case '\r':
-                if (state == 0 || state == 2) {
-                    ++state;
-                }
-
-                break;
-            case '\n':
-                if (state == 1 || state == 3) {
-                    ++state;
-                }
-
-                fputs("↙\n", stdout);
-                break;
-            default:
-                state = 0;
-
-                fputc(c, stdout);
-                break;
+        case '\r':
+            if (state == 0 || state == 2) {
+                ++state;
+            }
+            break;
+        case '\n':
+            if (state == 1 || state == 3) {
+                ++state;
+            }
+            fputs("↙\n", stdout);
+            break;
+        default:
+            state = 0;
+            fputc(c, stdout);
+            break;
         }
     }
 
     return state == 4;
+}
+
+void event_stop(int sig)
+{
+    (int)sig;
+
+    loop_flag = 0;
 }
