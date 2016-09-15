@@ -44,7 +44,7 @@ int main(int argc, char* argv[])
         pids[i] = fork();
         if (pids[i] == 0) {
             sockfd = sock_listen(&port);
-            event_loop(sockfd, BACKLOG, i + 1);
+            event_loop(sockfd, BACKLOG);
 
             close(sockfd);
             printf("#%d exited\n", i + 1);

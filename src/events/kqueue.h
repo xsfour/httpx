@@ -7,6 +7,6 @@
 
 typedef struct event_s event_t;
 
-int event_loop(int sockfd, int backlog, int id);
+int event_loop(int sockfd, int backlog);
 
 #endif //HTTPX_KQUEUE_H

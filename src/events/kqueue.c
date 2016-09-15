@@ -29,7 +29,7 @@ static inline int event_ctrl(int kq,
 
 static void event_stop(int sig);
 
-int event_loop(int sockfd, int backlog, int id)
+int event_loop(int sockfd, int backlog)
 {
     const int MAX_EVENTS = 1024;
 
@@ -47,7 +47,7 @@ int event_loop(int sockfd, int backlog, int id)
     ssize_t nrecv;
 
     assert(sockfd > 0);
-    printf("Sockfd=%d, id=%d\n", sockfd, id);
+    printf("Sockfd=%d, id=%d\n", sockfd, (int)getpid());
 
     if ((kq = kqueue()) == -1) {
         error_die("kqueue");
@@ -69,7 +69,7 @@ int event_loop(int sockfd, int backlog, int id)
         nevents = event_wait(kq, events, MAX_EVENTS, &ts);
 
         for (int i = 0; i < nevents; ++i) {
-            printf("(%d/%d #%d) \n", i + 1, nevents, id);
+            printf("(%d/%d #%d) \n", i + 1, nevents, (int)getpid());
 
             ident = (int)events[i].ident;
             flags = events[i].flags;
@@ -116,14 +116,14 @@ int event_loop(int sockfd, int backlog, int id)
         }
     }
 
-    printf("Loop exited #%d\n", id);
+    printf("Loop exited #%d\n", (int)getpid());
     close(kq);
 
     return 0;
 }
 
 int event_wait(int kq, struct kevent events[],
-                      int nevents_max, struct timespec* ts)
+               int nevents_max, struct timespec* ts)
 {
     int nevents;
 
